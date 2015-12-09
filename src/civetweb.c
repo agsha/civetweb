@@ -6048,6 +6048,7 @@ static const char* header_val(const struct mg_connection *conn, const char *head
 /*
  * replace all occurences of 'rep' with 'with' in 'orig' and return
  * the new string. The returned string must be free() ed after use.
+ * 'orig' is unchanged.
  */
 char *str_replace(char *orig, char *rep, char *with) {
     char *result; // the return string
@@ -6146,20 +6147,19 @@ static void log_access(const struct mg_connection *conn)
                 NULL //marker for end of array
         };
 
-        char *format = mg_strdup(conn->ctx->config[ACCESS_LOG_FORMAT]);
-        char *buf = NULL;
+        strcpy(buf, conn->ctx->config[ACCESS_LOG_FORMAT]);
+        char *tmp = NULL;
 
         for (int i = 0; replace_values[i] != NULL; i += 2) {
-            buf = str_replace(format, replace_values[i], replace_values[i + 1]);
-            mg_free(format);
-            format = buf;
+            tmp = str_replace(buf, replace_values[i], replace_values[i + 1]);
+            strcpy(buf, tmp);
+            mg_free(tmp);
         }
 
         flockfile(fp);
         fprintf(fp, "%s", buf);
         fputc('\n', fp);
         fflush(fp);
-        mg_free(buf);
         funlockfile(fp);
         fclose(fp);
     }
