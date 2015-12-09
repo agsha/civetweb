@@ -695,7 +695,7 @@ struct socket {
 enum {
     CGI_EXTENSIONS, CGI_ENVIRONMENT, PUT_DELETE_PASSWORDS_FILE, CGI_INTERPRETER,
     PROTECT_URI, AUTHENTICATION_DOMAIN, SSI_EXTENSIONS, THROTTLE,
-    ACCESS_LOG_FILE, ENABLE_DIRECTORY_LISTING, ERROR_LOG_FILE,
+    ACCESS_LOG_FILE, ACCESS_LOG_FORMAT, ENABLE_DIRECTORY_LISTING, ERROR_LOG_FILE,
     GLOBAL_PASSWORDS_FILE, INDEX_FILES, ENABLE_KEEP_ALIVE, ACCESS_CONTROL_LIST,
     EXTRA_MIME_TYPES, LISTENING_PORTS, DOCUMENT_ROOT, SSL_CERTIFICATE,
     NUM_THREADS, RUN_AS_USER, REWRITE, HIDE_FILES, REQUEST_TIMEOUT,
@@ -726,6 +726,9 @@ static struct mg_option config_options[] = {
     {"ssi_pattern",                 CONFIG_TYPE_EXT_PATTERN,   "**.shtml$|**.shtm$"},
     {"throttle",                    12345,                     NULL},
     {"access_log_file",             CONFIG_TYPE_FILE,          NULL},
+    {"access_log_format",           CONFIG_TYPE_STRING,        "$src_addr - $remote_user [$date] "
+                                                               "\"$req_method $uri HTTP/$http_version\" "
+                                                               "$status_code $num_bytes_sent $referer $user_agent"},
     {"enable_directory_listing",    CONFIG_TYPE_BOOLEAN,       "yes"},
     {"error_log_file",              CONFIG_TYPE_FILE,          NULL},
     {"global_auth_file",            CONFIG_TYPE_FILE,          NULL},
@@ -6042,6 +6045,50 @@ static const char* header_val(const struct mg_connection *conn, const char *head
     }
 }
 
+/*
+ * replace all occurences of 'rep' with 'with' in 'orig' and return
+ * the new string. The returned string must be free() ed after use.
+ */
+char *str_replace(char *orig, char *rep, char *with) {
+    char *result; // the return string
+    char *ins;    // the next insert point
+    char *tmp;    // varies
+    int len_rep;  // length of rep
+    int len_with; // length of with
+    int len_front; // distance between rep and end of last rep
+    int count;    // number of replacements
+
+    if (!orig)
+        return NULL;
+    if (!rep)
+        return orig;
+    if (!with)
+        return orig;
+
+    len_rep = strlen(rep);
+    len_with = strlen(with);
+
+    ins = orig;
+    for (count = 0; tmp = strstr(ins, rep); ++count) {
+        ins = tmp + len_rep;
+    }
+
+    tmp = result = mg_malloc(strlen(orig) + (len_with - len_rep) * count + 1);
+
+    if (!result)
+        return NULL;
+
+    while (count--) {
+        ins = strstr(orig, rep);
+        len_front = ins - orig;
+        tmp = strncpy(tmp, orig, len_front) + len_front;
+        tmp = strcpy(tmp, with) + len_with;
+        orig += len_front + len_rep;
+    }
+    strcpy(tmp, orig);
+    return result;
+}
+
 static void log_access(const struct mg_connection *conn)
 {
     const struct mg_request_info *ri;
@@ -6074,22 +6121,47 @@ static void log_access(const struct mg_connection *conn)
     referer = header_val(conn, "Referer");
     user_agent = header_val(conn, "User-Agent");
 
-    snprintf(buf, sizeof(buf), "%s - %s [%s] \"%s %s HTTP/%s\" %d %" INT64_FMT " %s %s",
-            src_addr, ri->remote_user == NULL ? "-" : ri->remote_user, date,
-            ri->request_method ? ri->request_method : "-",
-            ri->uri ? ri->uri : "-", ri->http_version,
-            conn->status_code, conn->num_bytes_sent,
-	    referer, user_agent);
-
     if (conn->ctx->callbacks.log_access) {
-        conn->ctx->callbacks.log_access(conn, buf);
+        conn->ctx->callbacks.log_access(conn, conn->ctx->config[ACCESS_LOG_FORMAT]);
     }
 
     if (fp) {
+        char *status_code_str = (char *)mg_malloc((size_t)10);
+        snprintf(status_code_str, 10, "%d", conn->status_code);
+
+        char *num_bytes_str = (char *)mg_malloc((size_t)50);
+        snprintf(num_bytes_str, 50, "%" INT64_FMT, conn->num_bytes_sent);
+
+        char* replace_values[] = {
+                "$src_addr", src_addr,
+                "$remote_user", ri->remote_user == NULL ? "-" : ri->remote_user,
+                "$date", date,
+                "$req_method", ri->request_method ? ri->request_method : "-",
+                "$uri", ri->uri ? ri->uri : "-",
+                "$http_version", ri->http_version,
+                "$status_code", status_code_str,
+                "$num_bytes_sent", num_bytes_str,
+                "$referer", referer,
+                "$user_agent", user_agent,
+                NULL //marker for end of array
+        };
+
+        char* format = mg_strdup(conn->ctx->config[ACCESS_LOG_FORMAT]);
+        char *buf=NULL;
+
+        for(int i=0; replace_values[i]!=NULL; i+=2) {
+            buf = str_replace(format, replace_values[i], replace_values[i+1]);
+            mg_free(format);
+            format = buf;
+        }
+
         flockfile(fp);
         fprintf(fp, "%s", buf);
         fputc('\n', fp);
         fflush(fp);
+        mg_free(buf);
+        mg_free(status_code_str);
+        mg_free(num_bytes_str);
         funlockfile(fp);
         fclose(fp);
     }
