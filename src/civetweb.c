@@ -6126,10 +6126,10 @@ static void log_access(const struct mg_connection *conn)
     }
 
     if (fp) {
-        char *status_code_str = (char *)mg_malloc((size_t)10);
+        char status_code_str[10];
         snprintf(status_code_str, 10, "%d", conn->status_code);
 
-        char *num_bytes_str = (char *)mg_malloc((size_t)50);
+        char num_bytes_str[50];
         snprintf(num_bytes_str, 50, "%" INT64_FMT, conn->num_bytes_sent);
 
         char* replace_values[] = {
@@ -6160,8 +6160,6 @@ static void log_access(const struct mg_connection *conn)
         fputc('\n', fp);
         fflush(fp);
         mg_free(buf);
-        mg_free(status_code_str);
-        mg_free(num_bytes_str);
         funlockfile(fp);
         fclose(fp);
     }
