@@ -6132,7 +6132,7 @@ static void log_access(const struct mg_connection *conn)
         char num_bytes_str[50];
         snprintf(num_bytes_str, 50, "%" INT64_FMT, conn->num_bytes_sent);
 
-        char* replace_values[] = {
+        char *replace_values[] = {
                 "$src_addr", src_addr,
                 "$remote_user", ri->remote_user == NULL ? "-" : ri->remote_user,
                 "$date", date,
@@ -6146,11 +6146,11 @@ static void log_access(const struct mg_connection *conn)
                 NULL //marker for end of array
         };
 
-        char* format = mg_strdup(conn->ctx->config[ACCESS_LOG_FORMAT]);
-        char *buf=NULL;
+        char *format = mg_strdup(conn->ctx->config[ACCESS_LOG_FORMAT]);
+        char *buf = NULL;
 
-        for(int i=0; replace_values[i]!=NULL; i+=2) {
-            buf = str_replace(format, replace_values[i], replace_values[i+1]);
+        for (int i = 0; replace_values[i] != NULL; i += 2) {
+            buf = str_replace(format, replace_values[i], replace_values[i + 1]);
             mg_free(format);
             format = buf;
         }
