@@ -6046,48 +6046,46 @@ static const char* header_val(const struct mg_connection *conn, const char *head
 }
 
 /*
- * replace all occurences of 'rep' with 'with' in 'orig' and return
- * the new string. The returned string must be free() ed after use.
- * 'orig' is unchanged.
+ * replace all occurences of 'rep' with 'with' in 'src' and copy the
+ * resulting string in dest. Atmost max_len characters are copied to dest
+ * including terminating null character.
+ * returns:
+ * 0 if max_len is too small to do the replace operation
+ * 1 if succesful.
  */
-char *str_replace(char *orig, char *rep, char *with) {
-    char *result; // the return string
-    char *ins;    // the next insert point
-    char *tmp;    // varies
-    int len_rep;  // length of rep
-    int len_with; // length of with
-    int len_front; // distance between rep and end of last rep
-    int count;    // number of replacements
 
-    if (!orig)
-        return NULL;
-    if (!rep)
-        return orig;
-    if (!with)
-        return orig;
+int str_replace(char *src, const char *replace, const char *with, char *dest, const int max_len) {
+    char *src_now = src;
+    char *src_next;
+    char *dest_now = dest;
+    int len_remaining = max_len;
 
-    len_rep = strlen(rep);
-    len_with = strlen(with);
-
-    ins = orig;
-    for (count = 0; tmp = strstr(ins, rep); ++count) {
-        ins = tmp + len_rep;
+    if (!src || !replace || !with || !dest) {
+        return 0;
     }
 
-    tmp = result = mg_malloc(strlen(orig) + (len_with - len_rep) * count + 1);
+    int len_replace = strlen(replace);
+    int len_with = strlen(with);
 
-    if (!result)
-        return NULL;
-
-    while (count--) {
-        ins = strstr(orig, rep);
-        len_front = ins - orig;
-        tmp = strncpy(tmp, orig, len_front) + len_front;
-        tmp = strcpy(tmp, with) + len_with;
-        orig += len_front + len_rep;
+    while (src_next = strstr(src_now, replace)) {
+        len_remaining -= (src_next - src_now + len_with);
+        if (len_remaining < 0) {
+            return 0;
+        }
+        dest_now = strncpy(dest_now, src_now, src_next - src_now) + (src_next - src_now);
+        dest_now = strncpy(dest_now, with, len_with) + len_with;
+        src_now = src_next + len_replace;
     }
-    strcpy(tmp, orig);
-    return result;
+
+    // copy the last part of src
+    while (len_remaining-- > 0 && (*dest_now++ = *src_now++));
+
+    // if the last character copied is not NULL,
+    // then we ran out of space
+    if (*(dest_now - 1)) {
+        return 0;
+    }
+    return 1;
 }
 
 static void log_access(const struct mg_connection *conn)
@@ -6099,8 +6097,6 @@ static void log_access(const struct mg_connection *conn)
 
     const char *referer;
     const char *user_agent;
-
-    char buf[4096];
 
     fp = conn->ctx->config[ACCESS_LOG_FILE] == NULL ?  NULL :
          fopen(conn->ctx->config[ACCESS_LOG_FILE], "a+");
@@ -6127,13 +6123,17 @@ static void log_access(const struct mg_connection *conn)
     }
 
     if (fp) {
+        char buf[2][MAX_CONF_FILE_LINE_SIZE];   // two temporary buffers
+        int cur = 0;    // index into buf
+
         char status_code_str[10];
         snprintf(status_code_str, 10, "%d", conn->status_code);
 
         char num_bytes_str[50];
-        snprintf(num_bytes_str, 50, "%" INT64_FMT, conn->num_bytes_sent);
+        snprintf(num_bytes_str, 50, "%"
+        INT64_FMT, conn->num_bytes_sent);
 
-        char *replace_values[] = {
+        const char *replace_values[] = {
                 "$src_addr", src_addr,
                 "$remote_user", ri->remote_user == NULL ? "-" : ri->remote_user,
                 "$date", date,
@@ -6147,20 +6147,25 @@ static void log_access(const struct mg_connection *conn)
                 NULL //marker for end of array
         };
 
-        strcpy(buf, conn->ctx->config[ACCESS_LOG_FORMAT]);
-        char *tmp = NULL;
+        strcpy(buf[cur], conn->ctx->config[ACCESS_LOG_FORMAT]);
 
+        int ok = 1;
         for (int i = 0; replace_values[i] != NULL; i += 2) {
-            tmp = str_replace(buf, replace_values[i], replace_values[i + 1]);
-            strcpy(buf, tmp);
-            mg_free(tmp);
+            ok = str_replace(buf[cur], replace_values[i], replace_values[i + 1],
+                             buf[1 - cur], MAX_CONF_FILE_LINE_SIZE);
+            if (!ok) {
+                mg_cry(conn, "error: access log line is too long!");
+                break;
+            }
+            cur = 1 - cur;
         }
-
-        flockfile(fp);
-        fprintf(fp, "%s", buf);
-        fputc('\n', fp);
-        fflush(fp);
-        funlockfile(fp);
+        if (ok) {
+            flockfile(fp);
+            fprintf(fp, "%s", buf[cur]);
+            fputc('\n', fp);
+            fflush(fp);
+            funlockfile(fp);
+        }
         fclose(fp);
     }
 }
