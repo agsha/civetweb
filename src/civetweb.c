@@ -6078,7 +6078,8 @@ int str_replace(char *src, const char *replace, const char *with, char *dest, co
     }
 
     // copy the last part of src
-    while (len_remaining-- > 0 && (*dest_now++ = *src_now++));
+    while (len_remaining-- > 0 && (*dest_now++ = *src_now++))
+        ;
 
     // if the last character copied is not NULL,
     // then we ran out of space
