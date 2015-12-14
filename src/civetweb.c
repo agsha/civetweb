@@ -6129,11 +6129,13 @@ static void log_access(const struct mg_connection *conn) {
             "c-ip", src_addr,
             "cs-username", ri->remote_user == NULL ? "-" : ri->remote_user,
             "cs-method", ri->request_method ? ri->request_method : "-",
-            "cs-uri", ri->uri ? ri->uri : "-",
+            "cs-uri", ri->query_string ? ri->query_string : "-",
+            "cs-uri-query", ri->uri ? ri->uri : "-",
             "sc-status", status_code_str,
             "sc-bytes", num_bytes_str,
             NULL //marker for end of array
     };
+
     for (; (token = strtok_r(log_format_ptr, " \n\f\t\r\v", &saveptr)) && ok; log_format_ptr = NULL) {
         const char *prefix = log_format_ptr == NULL ? " " : "";
         const int prefix_len = strlen(prefix);
