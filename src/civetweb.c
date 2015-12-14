@@ -1058,7 +1058,7 @@ static int mg_snprintf(struct mg_connection *conn, char *buf, size_t buflen,
 static int mg_str_replace(char *dst, const int max_len, const char *src, const char *replace, const char *with) {
     char *src_now = src;
     char *src_next;
-    char *dest_now = dst;
+    char *dst_now = dst;
     int len_remaining = max_len;
 
     if (!src || !replace || !with || !dst) {
@@ -6089,7 +6089,7 @@ static void log_access(const struct mg_connection *conn) {
     char date[64], time[64], buf[10 * MAX_LOG_FORMAT_LEN], log_format[MAX_LOG_FORMAT_LEN];
     struct tm start_tm;
     struct tm *ptm = &start_tm;
-    char *saveptr = NULL, *token, *ptr = buf;
+    char *saveptr = NULL, *token, *ptr = buf, *log_format_ptr = log_format;
     int remaining = ARRAY_SIZE(buf);
     int ok = 1;
 
@@ -6134,8 +6134,8 @@ static void log_access(const struct mg_connection *conn) {
             "sc-bytes", num_bytes_str,
             NULL //marker for end of array
     };
-    for (; (token = strtok_r(log_format, " \n\f\t\r\v", &saveptr)) && ok; log_format = NULL) {
-        const char *prefix = token == NULL ? " " : "";
+    for (; (token = strtok_r(log_format_ptr, " \n\f\t\r\v", &saveptr)) && ok; log_format_ptr = NULL) {
+        const char *prefix = log_format_ptr == NULL ? " " : "";
         const int prefix_len = strlen(prefix);
         const int token_len = strlen(token);
         const char *to_write = NULL;
