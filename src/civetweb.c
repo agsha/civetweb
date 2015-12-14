@@ -1048,7 +1048,7 @@ static int mg_snprintf(struct mg_connection *conn, char *buf, size_t buflen,
 
 
 /*
- * replace all occurences of 'rep' with 'with' in 'src' and copy the
+ * replace all occurences of 'replace' with 'with' in 'src' and copy the
  * resulting string in dst. Atmost max_len characters are copied to dst
  * including terminating null character.
  * returns:
