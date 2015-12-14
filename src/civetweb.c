@@ -6131,8 +6131,8 @@ static void log_access(const struct mg_connection *conn) {
             "c-ip", src_addr,
             "cs-username", ri->remote_user == NULL ? "-" : ri->remote_user,
             "cs-method", ri->request_method ? ri->request_method : "-",
-            "cs-uri", ri->query_string ? ri->query_string : "-",
-            "cs-uri-query", ri->uri ? ri->uri : "-",
+            "cs-uri-query", ri->query_string ? ri->query_string : "-",
+            "cs-uri", ri->uri ? ri->uri : "-",
             "sc-status", status_code_str,
             "sc-bytes", num_bytes_str,
             NULL //marker for end of array
