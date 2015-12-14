@@ -1085,8 +1085,8 @@ static int mg_str_replace(char *dst, const int max_len, const char *src, const c
     // if the last character copied is not NULL,
     // then we ran out of space
     if (*(dst_now - 1)) {
-		// null-terminate to avoid buffer overflows
-		*(dst_now-1) = '\0';
+        // null-terminate to avoid buffer overflows
+        *(dst_now - 1) = '\0';
         return 0;
     }
     return 1;
@@ -6143,25 +6143,29 @@ static void log_access(const struct mg_connection *conn) {
         const int prefix_len = strlen(prefix);
         const int token_len = strlen(token);
         const char *to_write = NULL;
+        // process request headers
         if (strncmp("cs(", token, 3) == 0 && token[token_len - 1] == ')') {
             char header_name[token_len];
             strncpy(header_name, token + 3, token_len - 4);
             header_name[token_len - 4] = '\0';
-            char esc_hdr_val[MAX_LOG_FORMAT_LEN];
-            // escape quotes
-            ok &= mg_str_replace(esc_hdr_val, ARRAY_SIZE(esc_hdr_val), mg_get_header(conn, header_name), "\"", "\"\"");
-            if (!ok) {
-                break;
+            char *header_val = mg_get_header(conn, header_name);
+            if (header_val) {
+                char esc_hdr_val[MAX_LOG_FORMAT_LEN];
+                // escape quotes
+                ok &= mg_str_replace(esc_hdr_val, ARRAY_SIZE(esc_hdr_val), header_val, "\"", "\"\"");
+                if (!ok) {
+                    break;
+                }
+                char quot_hdr_val[MAX_LOG_FORMAT_LEN];
+                // surround the string with quotes
+                ok &= (unsigned) (snprintf(quot_hdr_val, ARRAY_SIZE(quot_hdr_val), "\"%s\"", esc_hdr_val) <
+                                  ARRAY_SIZE(quot_hdr_val));
+                if (!ok) {
+                    break;
+                }
+                to_write = quot_hdr_val;
             }
-            char quot_hdr_val[MAX_LOG_FORMAT_LEN];
-            // surround the string with quotes
-            ok &= (unsigned) (snprintf(quot_hdr_val, ARRAY_SIZE(quot_hdr_val), "\"%s\"", esc_hdr_val) <
-                              ARRAY_SIZE(quot_hdr_val));
-            to_write = quot_hdr_val;
-            if (!ok) {
-                break;
-            }
-        } else {
+        } else { // process regular fields
             for (int i = 0; field_values[i] != NULL; i += 2) {
                 if (strcmp(token, field_values[i]) == 0) {
                     to_write = field_values[i + 1];
