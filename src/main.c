@@ -76,6 +76,7 @@ static int guard = 0;                   /* test if any dialog is already open */
 #endif /* _WIN32 */
 
 #define MAX_OPTIONS 100
+#define MAX_CONF_FILE_LINE_SIZE (8 * 1024)
 
 static int exit_flag = 0;               /* Main loop should exit */
 static char server_base_name[40];       /* Set by init_server_name() */
