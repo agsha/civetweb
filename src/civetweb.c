@@ -95,6 +95,10 @@
 #define MAX_WORKER_THREADS (1024*64)
 #endif
 
+#ifndef MAX_LOG_FORMAT_LEN
+#define MAX_LOG_FORMAT_LEN (500)
+#endif
+
 #if defined(_WIN32) && !defined(__SYMBIAN32__) /* Windows specific */
 #if defined(_MSC_VER) && _MSC_VER <= 1400
 #undef _WIN32_WINNT
@@ -695,7 +699,7 @@ struct socket {
 enum {
     CGI_EXTENSIONS, CGI_ENVIRONMENT, PUT_DELETE_PASSWORDS_FILE, CGI_INTERPRETER,
     PROTECT_URI, AUTHENTICATION_DOMAIN, SSI_EXTENSIONS, THROTTLE,
-    ACCESS_LOG_FILE, ENABLE_DIRECTORY_LISTING, ERROR_LOG_FILE,
+    ACCESS_LOG_FILE, ACCESS_LOG_FORMAT, ENABLE_DIRECTORY_LISTING, ERROR_LOG_FILE,
     GLOBAL_PASSWORDS_FILE, INDEX_FILES, ENABLE_KEEP_ALIVE, ACCESS_CONTROL_LIST,
     EXTRA_MIME_TYPES, LISTENING_PORTS, DOCUMENT_ROOT, SSL_CERTIFICATE,
     NUM_THREADS, RUN_AS_USER, REWRITE, HIDE_FILES, REQUEST_TIMEOUT,
@@ -726,6 +730,9 @@ static struct mg_option config_options[] = {
     {"ssi_pattern",                 CONFIG_TYPE_EXT_PATTERN,   "**.shtml$|**.shtm$"},
     {"throttle",                    12345,                     NULL},
     {"access_log_file",             CONFIG_TYPE_FILE,          NULL},
+    {"access_log_format",           CONFIG_TYPE_STRING,        "c-ip cs-username date time cs-method "
+															   "cs-uri sc-status sc-bytes "
+															   "cs(Referer) cs(User-Agent)"},
     {"enable_directory_listing",    CONFIG_TYPE_BOOLEAN,       "yes"},
     {"error_log_file",              CONFIG_TYPE_FILE,          NULL},
     {"global_auth_file",            CONFIG_TYPE_FILE,          NULL},
@@ -1037,6 +1044,52 @@ static int mg_snprintf(struct mg_connection *conn, char *buf, size_t buflen,
     va_end(ap);
 
     return n;
+}
+
+
+/*
+ * replace all occurences of 'replace' with 'with' in 'src' and copy the
+ * resulting string in dst. Atmost max_len characters are copied to dst
+ * including terminating null character.
+ * returns:
+ * 0 if max_len is too small to do the replace operation
+ * 1 if succesful.
+ */
+static int mg_str_replace(char *dst, const int max_len, const char *src, const char *replace, const char *with) {
+    char *src_now = src;
+    char *src_next;
+    char *dst_now = dst;
+    int len_remaining = max_len;
+
+    if (!src || !replace || !with || !dst) {
+        return 0;
+    }
+
+    int len_replace = strlen(replace);
+    int len_with = strlen(with);
+
+    while (src_next = strstr(src_now, replace)) {
+        len_remaining -= (src_next - src_now + len_with);
+        if (len_remaining < 0) {
+            return 0;
+        }
+        dst_now = stpncpy(dst_now, src_now, src_next - src_now);
+        dst_now = stpncpy(dst_now, with, len_with);
+        src_now = src_next + len_replace;
+    }
+
+    // copy the last part of src
+    while (len_remaining-- > 0 && (*dst_now++ = *src_now++))
+        ;
+
+    // if the last character copied is not NULL,
+    // then we ran out of space
+    if (*(dst_now - 1)) {
+        // null-terminate to avoid buffer overflows
+        *(dst_now - 1) = '\0';
+        return 0;
+    }
+    return 1;
 }
 
 static int get_option_index(const char *name)
@@ -6031,68 +6084,117 @@ static int set_ports_option(struct mg_context *ctx)
     return success;
 }
 
-static const char* header_val(const struct mg_connection *conn, const char *header)
-{
-    const char *header_value;
-
-    if ((header_value = mg_get_header(conn, header)) == NULL) {
-        return "-";
-    } else {
-        return header_value;
-    }
-}
-
-static void log_access(const struct mg_connection *conn)
-{
-    const struct mg_request_info *ri;
+static void log_access(const struct mg_connection *conn) {
+    const struct mg_request_info *ri = &conn->request_info;
     FILE *fp;
-    char date[64], src_addr[IP_ADDR_STR_LEN];
-    struct tm *tm;
+    char status_code_str[10], num_bytes_str[50], src_addr[IP_ADDR_STR_LEN];
+    char date[64], time[64], buf[10 * MAX_LOG_FORMAT_LEN], log_format[MAX_LOG_FORMAT_LEN];
+    struct tm start_tm;
+    struct tm *ptm = &start_tm;
+    char *saveptr = NULL, *token, *ptr = buf, *log_format_ptr = log_format;
+    int remaining = ARRAY_SIZE(buf);
+    int ok = 1;
 
-    const char *referer;
-    const char *user_agent;
-
-    char buf[4096];
-
-    fp = conn->ctx->config[ACCESS_LOG_FILE] == NULL ?  NULL :
+    fp = conn->ctx->config[ACCESS_LOG_FILE] == NULL ? NULL :
          fopen(conn->ctx->config[ACCESS_LOG_FILE], "a+");
 
     if (fp == NULL && conn->ctx->callbacks.log_message == NULL)
         return;
 
-    tm = localtime(&conn->birth_time);
-    if (tm != NULL) {
-        strftime(date, sizeof(date), "%d/%b/%Y:%H:%M:%S %z", tm);
-    } else {
-        mg_strlcpy(date, "01/Jan/1970:00:00:00 +0000", sizeof(date));
-        date[sizeof(date) - 1] = '\0';
-    }
-
-    ri = &conn->request_info;
-
-    sockaddr_to_string(src_addr, sizeof(src_addr), &conn->client.rsa);
-    referer = header_val(conn, "Referer");
-    user_agent = header_val(conn, "User-Agent");
-
-    snprintf(buf, sizeof(buf), "%s - %s [%s] \"%s %s HTTP/%s\" %d %" INT64_FMT " %s %s",
-            src_addr, ri->remote_user == NULL ? "-" : ri->remote_user, date,
-            ri->request_method ? ri->request_method : "-",
-            ri->uri ? ri->uri : "-", ri->http_version,
-            conn->status_code, conn->num_bytes_sent,
-	    referer, user_agent);
 
     if (conn->ctx->callbacks.log_access) {
-        conn->ctx->callbacks.log_access(conn, buf);
+        conn->ctx->callbacks.log_access(conn, conn->ctx->config[ACCESS_LOG_FORMAT]);
     }
 
-    if (fp) {
+    if (!fp) {
+        return;
+    }
+
+    mg_strlcpy(log_format, conn->ctx->config[ACCESS_LOG_FORMAT], sizeof(log_format));
+
+
+    ptm = gmtime_r(&conn->birth_time, ptm);
+    if (ptm != NULL) {
+        strftime(date, sizeof(date), "%Y-%m-%d", ptm);
+        strftime(time, sizeof(time), "%H-%M-%S", ptm);
+    } else {
+        mg_strlcpy(time, "00-00-00", sizeof(time));
+        mg_strlcpy(date, "1970-01-01", sizeof(date));
+    }
+    sockaddr_to_string(src_addr, sizeof(src_addr), &conn->client.rsa);
+    snprintf(status_code_str, sizeof(status_code_str), "%d", conn->status_code);
+    snprintf(num_bytes_str, 50, "%"
+    INT64_FMT, conn->num_bytes_sent);
+    const char *field_values[] = {
+            "date", date,
+            "time", time,
+            "c-ip", src_addr,
+            "cs-username", ri->remote_user == NULL ? "-" : ri->remote_user,
+            "cs-method", ri->request_method ? ri->request_method : "-",
+            "cs-uri-query", ri->query_string ? ri->query_string : "-",
+            "cs-uri", ri->uri ? ri->uri : "-",
+            "sc-status", status_code_str,
+            "sc-bytes", num_bytes_str,
+            NULL //marker for end of array
+    };
+
+    for (; (token = strtok_r(log_format_ptr, " \n\f\t\r\v", &saveptr)) && ok; log_format_ptr = NULL) {
+        const char *prefix = log_format_ptr == NULL ? " " : "";
+        const int prefix_len = strlen(prefix);
+        const int token_len = strlen(token);
+        const char *to_write = NULL;
+        // process request headers
+        if (strncmp("cs(", token, 3) == 0 && token[token_len - 1] == ')') {
+            char header_name[token_len];
+            strncpy(header_name, token + 3, token_len - 4);
+            header_name[token_len - 4] = '\0';
+            char *header_val = mg_get_header(conn, header_name);
+            if (header_val) {
+                char esc_hdr_val[MAX_LOG_FORMAT_LEN];
+                // escape quotes
+                ok &= mg_str_replace(esc_hdr_val, ARRAY_SIZE(esc_hdr_val), header_val, "\"", "\"\"");
+                if (!ok) {
+                    break;
+                }
+                char quot_hdr_val[MAX_LOG_FORMAT_LEN];
+                // surround the string with quotes
+                ok &= (unsigned) (snprintf(quot_hdr_val, ARRAY_SIZE(quot_hdr_val), "\"%s\"", esc_hdr_val) <
+                                  ARRAY_SIZE(quot_hdr_val));
+                if (!ok) {
+                    break;
+                }
+                to_write = quot_hdr_val;
+            }
+        } else { // process regular fields
+            for (int i = 0; field_values[i] != NULL; i += 2) {
+                if (strcmp(token, field_values[i]) == 0) {
+                    to_write = field_values[i + 1];
+                    break;
+                }
+            }
+        }
+
+        to_write = to_write ? to_write : "-";
+        int to_write_len = strlen(to_write);
+        if (remaining >= to_write_len + prefix_len) {
+            ptr = stpcpy(ptr, prefix);
+            ptr = stpcpy(ptr, to_write);
+            remaining -= (to_write_len + prefix_len);
+        } else {
+            ok = 0;
+            break;
+        }
+    }
+    if (!ok) {
+        mg_cry(conn, "Generated log line is too long. Max allowed length is %d", MAX_LOG_FORMAT_LEN);
+    } else {
         flockfile(fp);
         fprintf(fp, "%s", buf);
         fputc('\n', fp);
         fflush(fp);
         funlockfile(fp);
-        fclose(fp);
     }
+    fclose(fp);
 }
 
 /* Verify given socket address against the ACL.
@@ -7020,6 +7122,7 @@ struct mg_context *mg_start(const struct mg_callbacks *callbacks,
     const char *name, *value, *default_value;
     int i, ok;
     int workerthreadcount;
+    FILE *fp;
 
 #if defined(_WIN32) && !defined(__SYMBIAN32__)
     WSADATA data;
@@ -7096,6 +7199,14 @@ struct mg_context *mg_start(const struct mg_callbacks *callbacks,
         }
     }
 
+    if (strlen(ctx->config[ACCESS_LOG_FORMAT]) > MAX_LOG_FORMAT_LEN) {
+        char msg[500];
+        sprintf(msg, "Access log format is too long. Max length is %d", MAX_LOG_FORMAT_LEN);
+        mg_cry(fc(ctx), "%s", msg);
+        free_context(ctx);
+        return NULL;
+    }
+
     get_system_name(&ctx->systemName);
 
     /* NOTE(lsm): order is important here. SSL certificates must
@@ -7144,6 +7255,18 @@ struct mg_context *mg_start(const struct mg_callbacks *callbacks,
         return NULL;
     }
 #endif
+
+
+    fp = ctx->config[ACCESS_LOG_FILE] == NULL ? NULL :
+         fopen(ctx->config[ACCESS_LOG_FILE], "a+");
+    if (fp) {
+        flockfile(fp);
+        fprintf(fp, "#Version: 1.0\n");
+        fprintf(fp, "#Fields: %s\n", ctx->config[ACCESS_LOG_FORMAT]);
+        fflush(fp);
+        funlockfile(fp);
+        fclose(fp);
+    }
 
     /* Start master (listening) thread */
     mg_start_thread_with_id(master_thread, ctx, &ctx->masterthreadid);
