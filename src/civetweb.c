@@ -1085,6 +1085,8 @@ static int mg_str_replace(char *dst, const int max_len, const char *src, const c
     // if the last character copied is not NULL,
     // then we ran out of space
     if (*(dst_now - 1)) {
+		// null-terminate to avoid buffer overflows
+		*(dst_now-1) = '\0';
         return 0;
     }
     return 1;
@@ -6147,7 +6149,10 @@ static void log_access(const struct mg_connection *conn) {
             header_name[token_len - 4] = '\0';
             char esc_hdr_val[MAX_LOG_FORMAT_LEN];
             // escape quotes
-            mg_str_replace(esc_hdr_val, ARRAY_SIZE(esc_hdr_val), mg_get_header(conn, header_name), "\"", "\"\"");
+            ok &= mg_str_replace(esc_hdr_val, ARRAY_SIZE(esc_hdr_val), mg_get_header(conn, header_name), "\"", "\"\"");
+            if (!ok) {
+                break;
+            }
             char quot_hdr_val[MAX_LOG_FORMAT_LEN];
             // surround the string with quotes
             ok &= (unsigned) (snprintf(quot_hdr_val, ARRAY_SIZE(quot_hdr_val), "\"%s\"", esc_hdr_val) <
