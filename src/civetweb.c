@@ -6177,9 +6177,7 @@ static void log_access(const struct mg_connection *conn) {
         }
     }
     if (!ok) {
-        char cry_msg[500];
-        sprintf(cry_msg, "Generated log line is too long. Max allowed length is %d", MAX_LOG_FORMAT_LEN);
-        mg_cry(conn, "%s", cry_msg);
+        mg_cry(conn, "Generated log line is too long. Max allowed length is %d", MAX_LOG_FORMAT_LEN);
     } else {
         flockfile(fp);
         fprintf(fp, "%s", buf);
