@@ -358,6 +358,7 @@ void *pthread_getspecific(pthread_key_t key)
 #ifndef MAX_REQUEST_SIZE
 #define MAX_REQUEST_SIZE 16384
 #endif
+#define SOMAXCONN_LEN 15
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
 #if !defined(DEBUG_TRACE)
@@ -710,7 +711,7 @@ enum {
 #if defined(USE_LUA) && defined(USE_WEBSOCKET)
     LUA_WEBSOCKET_EXTENSIONS,
 #endif
-    ACCESS_CONTROL_ALLOW_ORIGIN, ERROR_PAGES, MAXCONN,
+    ACCESS_CONTROL_ALLOW_ORIGIN, ERROR_PAGES, LISTEN_QUEUE_LENGTH,
 
     NUM_OPTIONS
 };
@@ -761,8 +762,8 @@ static struct mg_option config_options[] = {
 #endif
     {"access_control_allow_origin", CONFIG_TYPE_STRING,        "*"},
     {"error_pages",                 CONFIG_TYPE_DIRECTORY,     NULL},
-    {"maxconn",                     CONFIG_TYPE_NUMBER,        NULL}, // not actually null. 
-	                                                                  //It will be initialized to SOMAXCONN in mg_start
+    {"listen_queue_length",         CONFIG_TYPE_NUMBER,        NULL }, // not actually NULL.
+                                                                       //It will be initialized to SOMAXCONN in mg_start
 
     {NULL, CONFIG_TYPE_UNKNOWN, NULL}
 };
@@ -5993,7 +5994,7 @@ static int set_ports_option(struct mg_context *ctx)
 #endif
                    bind(so.sock, &so.lsa.sa, so.lsa.sa.sa_family == AF_INET ?
                         sizeof(so.lsa.sin) : sizeof(so.lsa)) != 0 ||
-                   listen(so.sock, atoi(ctx->config[MAXCONN])) != 0 ||
+                   listen(so.sock, atoi(ctx->config[LISTEN_QUEUE_LENGTH])) != 0 ||
                    getsockname(so.sock, &(usa.sa), &len) != 0) {
             mg_cry(fc(ctx), "%s: cannot bind to %.*s: %d (%s)", __func__,
                    (int) vec.len, vec.ptr, ERRNO, strerror(errno));
@@ -7022,8 +7023,7 @@ struct mg_context *mg_start(const struct mg_callbacks *callbacks,
     const char *name, *value, *default_value;
     int i, ok;
     int workerthreadcount;
-	const int somaxconn_len = 15;
-	char somaxconn[somaxconn_len];
+    char somaxconn[SOMAXCONN_LEN];
 
 #if defined(_WIN32) && !defined(__SYMBIAN32__)
     WSADATA data;
@@ -7099,10 +7099,11 @@ struct mg_context *mg_start(const struct mg_callbacks *callbacks,
             ctx->config[i] = mg_strdup(default_value);
         }
     }
-	if (ctx->config[MAXCONN] == NULL) {
-		snprintf(somaxconn, somaxconn_len, "%d", SOMAXCONN);
-		ctx->config[MAXCONN] = mg_strdup(somaxconn);
-	}
+    /* Set default value of LISTEN_QUEUE_LENGTH if no user-specified value */
+    if (ctx->config[LISTEN_QUEUE_LENGTH] == NULL) {
+        snprintf(somaxconn, SOMAXCONN_LEN, "%d", SOMAXCONN);
+        ctx->config[LISTEN_QUEUE_LENGTH] = mg_strdup(somaxconn);
+    }
 
     get_system_name(&ctx->systemName);
 
